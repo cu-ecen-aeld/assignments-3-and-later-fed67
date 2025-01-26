@@ -1,4 +1,9 @@
 #include "systemcalls.h"
+#include <unistd.h>
+#include <sys/wait.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <fcntl.h>
 
 /**
  * @param cmd the command to execute with system()
@@ -16,8 +21,9 @@ bool do_system(const char *cmd)
  *   and return a boolean true if the system() call completed with success
  *   or false() if it returned a failure
 */
+    int ret = system(cmd);
 
-    return true;
+    return ret != -1;
 }
 
 /**
@@ -47,7 +53,7 @@ bool do_exec(int count, ...)
     command[count] = NULL;
     // this line is to avoid a compile warning before your implementation is complete
     // and may be removed
-    command[count] = command[count];
+    //command[count] = command[count];
 
 /*
  * TODO:
@@ -59,9 +65,33 @@ bool do_exec(int count, ...)
  *
 */
 
+    int status;
+    int ret = 1;
+
+
+    fflush(stdout);
+    int id = fork();
+
+    if(id < 0 ) {
+        return false;
+    }
+
+    if( id == 0) {
+        ret = execv(command[0], command);
+
+        //should not come here
+        if( ret == -1) {
+            exit(5);
+        } else {
+            exit(1);
+        }
+    } else {
+        wait(&status);
+    }
+    
     va_end(args);
 
-    return true;
+    return status == 0;
 }
 
 /**
@@ -82,7 +112,7 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
     command[count] = NULL;
     // this line is to avoid a compile warning before your implementation is complete
     // and may be removed
-    command[count] = command[count];
+    //command[count] = command[count];
 
 
 /*
@@ -92,6 +122,28 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
  *   The rest of the behaviour is same as do_exec()
  *
 */
+
+    int status;
+
+    fflush(stdout);
+    int id = fork();
+
+
+    //int kidpid;
+    int fd = open(outputfile, O_WRONLY|O_TRUNC|O_CREAT, 0644);
+    if (fd < 0) { perror("open"); abort(); }
+
+    if( id == 0) {
+        dup2(fd, 1);
+        close(fd);
+        execv(command[0], command);
+
+        //should not come here
+        exit(5);
+    } else {
+        close(fd);
+        wait(&status);
+    }
 
     va_end(args);
 
