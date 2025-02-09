@@ -25,7 +25,11 @@ fi
 #define own path variables
 root_dir="${OUTDIR}/rootfs"
 
-mkdir -p ${OUTDIR}
+if [ ! -d $OUTDIR ]
+then
+    mkdir -p $OUTDIR
+
+fi
 
 cd "$OUTDIR"
 if [ ! -d "${OUTDIR}/linux-stable" ]; then
@@ -65,11 +69,6 @@ fi
 
 # TODO: Create necessary base directories
 
-if [ ! -d $OUTDIR ]
-then
-    mkdir $OUTDIR
-
-fi
 cd ${root_dir}
 
 mkdir -p bin dev etc home lib lib64 proc sbin  sys tmp usr var
@@ -94,7 +93,6 @@ fi
 
 # TODO: Make and install busybox
 make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} -j 4
-
 
 make CONFIG_PREFIX=${root_dir} ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} install
 cd ${root_dir}
