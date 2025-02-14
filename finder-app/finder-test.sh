@@ -65,6 +65,8 @@ OUTPUTSTRING=$(finder.sh "$WRITEDIR" "$WRITESTR")
 
 set +e
 echo ${OUTPUTSTRING} | grep "${MATCHSTR}"
+echo ${OUTPUTSTRING} > /tmp/assignment4-result.txt
+
 if [ $? -eq 0 ]; then
 	echo "success"
 	exit 0
@@ -73,4 +75,3 @@ else
 	exit 1
 fi
 
-echo ${OUTPUTSTRING} > /tmp/assignment4-result.txt
