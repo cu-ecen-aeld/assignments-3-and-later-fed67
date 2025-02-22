@@ -146,6 +146,7 @@ void receive_connections() {
     const int read_buffer_size = read_file(filename, &read_buffer);
 
     n = write(new_socket, read_buffer, read_buffer_size);
+    free(read_buffer);
 
     if (n < 0) {
       active_connection = 0;
