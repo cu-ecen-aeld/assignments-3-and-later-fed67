@@ -1,4 +1,8 @@
-CC=gcc
+CC ?= gcc
+
+ifdef CROSS_COMPILE 
+	CC = $(CROSS_COMPILE)gcc
+endif
 
 all:
 	$(CC) aesdsocket.c -g -O0 -o aesdsocket
