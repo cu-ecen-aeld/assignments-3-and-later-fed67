@@ -2,7 +2,9 @@ PID=-1
 
 do_start() {
     /usr/bin/aesdsocket -d
-    PID=$(pgrep aesdsocket)
+
+    PID=$!
+    echo $PID
 }
 
 do_stop() {
