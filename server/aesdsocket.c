@@ -13,6 +13,7 @@
 #define BUFFER_SIZE 256
 
 int socketfd = 0;
+int new_socket = 0;
 char buffer[BUFFER_SIZE];
 int opt = 1;
 
@@ -27,6 +28,10 @@ const char* filename = "/var/tmp/aesdsocketdata";
 static void handle_signals(int signalnumber) {
   syslog(LOG_WARNING, "Caught signal, exeting");
   if (active_connection == 0) {
+    if (socketfd > 0) {
+      shutdown(socketfd, 0);
+    }
+
     if (socketfd > 0) {
       shutdown(socketfd, 0);
     }
@@ -108,7 +113,7 @@ void receive_connections() {
   while (1) {
     syslog(LOG_NOTICE, "while\n");
     socklen_t clilen = sizeof(client_address);
-    int new_socket = accept(socketfd, (struct sockaddr*)&client_address, &clilen);
+    new_socket = accept(socketfd, (struct sockaddr*)&client_address, &clilen);
     active_connection = 1;
     if (new_socket < 0) {
       syslog(LOG_ERR, "Got error socket: %s (errno: %d)\n", strerror(errno), errno);
@@ -130,7 +135,7 @@ void receive_connections() {
       }
 
       if (n > 0) {
-        // printf("Write to file %d characters \n", n);
+        syslog(LOG_DEBUG, "Write to file %d characters \n", n);
         write_file(filename, buffer, n);
         if (buffer[n - 1] == '\n') {
           syslog(LOG_DEBUG, "receive zero");
@@ -186,11 +191,13 @@ void server_thread(const char* filename, int is_daemon) {
   if (is_daemon == 1) {
     switch (fork()) {
       case -1:
+        syslog(LOG_INFO, "Error during fork");
         exit(EXIT_FAILURE);
         break;
       case 0:
         break;
       default:
+        syslog(LOG_INFO, "Main thread Exiting");
         exit(EXIT_SUCCESS);
         break;
     }
@@ -219,6 +226,9 @@ int main(int argc, const char* argv[]) {
   openlog(NULL, LOG_CONS, LOG_SYSLOG);
 
   remove(filename);
+  signal(SIGTERM, handle_signals);
+  signal(SIGINT, handle_signals);
+
 
   if (argc == 2) {
     char cmd[2] = "-d";
