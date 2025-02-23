@@ -52,9 +52,10 @@ int write_file(const char* filename, const char* buffer, int size) {
   int result = fwrite(buffer, sizeof(char), size, file);
 
   syslog(LOG_DEBUG, "writing %d bytes to file\n", size);
-  // for(int i = 0; i < size; ++i) {
-  //     syslog(LOG_DEBUG, "i %d char %c \n", i, buffer[i]);
-  // }
+  for(int i = 0; i < size; ++i) {
+      syslog(LOG_DEBUG, "i %d char %c \n", i, buffer[i]);
+  }
+  syslog(LOG_DEBUG, "END");
   fclose(file);
   return result;
 }
