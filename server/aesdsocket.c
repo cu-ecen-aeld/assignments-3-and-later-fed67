@@ -154,6 +154,7 @@ void receive_connections() {
 
     n = write(new_socket, read_buffer, read_buffer_size);
     free(read_buffer);
+    close(new_socket);
 
     if (n < 0) {
       active_connection = 0;
