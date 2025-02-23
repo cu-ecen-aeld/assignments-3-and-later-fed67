@@ -190,6 +190,7 @@ void server_thread(const char* filename, int is_daemon) {
     perror("bind failed");
     closelog();
   }
+  int g;
 
   if (is_daemon == 1) {
     switch (fork()) {
