@@ -10,7 +10,7 @@
 #include <unistd.h>
 
 #define PORT 9000
-#define BUFFER_SIZE 256
+#define BUFFER_SIZE 2048
 
 int socketfd = 0;
 int new_socket = 0;
@@ -27,19 +27,17 @@ const char* filename = "/var/tmp/aesdsocketdata";
 
 static void handle_signals(int signalnumber) {
   syslog(LOG_WARNING, "Caught signal, exeting");
-  if (active_connection == 0) {
-    if (socketfd > 0) {
-      shutdown(socketfd, 0);
-    }
-
-    if (socketfd > 0) {
-      shutdown(socketfd, 0);
-    }
-
-    remove(filename);
-
-    exit(0);
+  if (socketfd > 0) {
+    shutdown(socketfd, 0);
   }
+
+  if (socketfd > 0) {
+    shutdown(socketfd, 0);
+  }
+
+  remove(filename);
+  exit(0);
+
 }
 
 int write_file(const char* filename, const char* buffer, int size) {
@@ -116,6 +114,7 @@ void receive_connections() {
     socklen_t clilen = sizeof(client_address);
     new_socket = accept(socketfd, (struct sockaddr*)&client_address, &clilen);
     active_connection = 1;
+
     if (new_socket < 0) {
       syslog(LOG_ERR, "Got error socket: %s (errno: %d)\n", strerror(errno), errno);
       perror("accept failed");
@@ -126,43 +125,21 @@ void receive_connections() {
     }
 
     int new_line_recieved = 0;
-    while (1) {
-      memset(buffer, BUFFER_SIZE, 0);
-      n = recv(new_socket, buffer, BUFFER_SIZE, 0);
-      syslog(LOG_DEBUG, "Write to file %d characters \n", n);
-      if (n < 0) {
-        // Use errno to get the error reason
-        syslog(LOG_DEBUG, "recv failed: %s (errno: %d)\n", strerror(errno), errno);
-        break;
-      }
-
-      if (n > 0) {
-        
+    while ( (n = recv(new_socket, buffer, BUFFER_SIZE, 0) )> 0) {
         write_file(filename, buffer, n);
         if (buffer[n - 1] == '\n') {
           syslog(LOG_DEBUG, "receive zero");
           break;
         }
-      } else if (n < 0) {
-        syslog(LOG_DEBUG, "Got error: %s (errno: %d)\n", strerror(errno), errno);
-        exit(1);
-      }
     }
     syslog(LOG_DEBUG, "sending response");
     char* read_buffer;
     const int read_buffer_size = read_file(filename, &read_buffer);
 
-    n = write(new_socket, read_buffer, read_buffer_size);
-    free(read_buffer);
-    //close(new_socket);
+    n = send(new_socket, read_buffer, read_buffer_size, 0);
 
-    if (n < 0) {
-      active_connection = 0;
-      // Use errno to get the error reason
-      syslog(LOG_DEBUG, "send failed: %s (errno: %d)\n", strerror(errno), errno);
-      break;
-    }
-    active_connection = 0;
+    free(read_buffer);
+    close(new_socket);
   }
 }
 
@@ -176,7 +153,7 @@ void server_thread(const char* filename, int is_daemon) {
     exit(EXIT_FAILURE);
   }
 
-  if (setsockopt(socketfd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt)) < 0) {
+  if (setsockopt(socketfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
     syslog(LOG_ERR, "Got error setsockopt: %s (errno: %d)\n", strerror(errno), errno);
     perror("set socket failed");
   }
@@ -190,7 +167,7 @@ void server_thread(const char* filename, int is_daemon) {
     perror("bind failed");
     closelog();
   }
-  int g;
+
 
   if (is_daemon == 1) {
     switch (fork()) {
@@ -205,15 +182,23 @@ void server_thread(const char* filename, int is_daemon) {
         exit(EXIT_SUCCESS);
         break;
     }
-
-    signal(SIGTERM, handle_signals);
-    signal(SIGINT, handle_signals);
-    receive_connections();
-  } else {
-    signal(SIGTERM, handle_signals);
-    signal(SIGINT, handle_signals);
-    receive_connections();
   }
+
+  if (setsid() < 0) {
+      syslog(LOG_ERR, "Error in setsid");
+      exit(EXIT_FAILURE);
+   }
+
+  close(STDIN_FILENO);
+  close(STDOUT_FILENO);
+  close(STDERR_FILENO);
+
+  open("/dev/null", O_RDONLY);
+  open("/dev/null", O_WRONLY);
+  open("/dev/null", O_WRONLY);
+  
+  receive_connections();
+
 }
 
 int match(const char* a, const char* b, int length) {
