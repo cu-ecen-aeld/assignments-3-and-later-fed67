@@ -128,6 +128,7 @@ void receive_connections() {
     while (1) {
       memset(buffer, BUFFER_SIZE, 0);
       n = recv(new_socket, buffer, BUFFER_SIZE, 0);
+      syslog(LOG_DEBUG, "Write to file %d characters \n", n);
       if (n < 0) {
         // Use errno to get the error reason
         syslog(LOG_DEBUG, "recv failed: %s (errno: %d)\n", strerror(errno), errno);
@@ -135,7 +136,7 @@ void receive_connections() {
       }
 
       if (n > 0) {
-        syslog(LOG_DEBUG, "Write to file %d characters \n", n);
+        
         write_file(filename, buffer, n);
         if (buffer[n - 1] == '\n') {
           syslog(LOG_DEBUG, "receive zero");
