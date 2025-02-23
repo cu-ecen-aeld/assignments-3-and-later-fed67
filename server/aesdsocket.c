@@ -38,7 +38,7 @@ static void handle_signals(int signalnumber) {
 
     remove(filename);
 
-    exit(1);
+    exit(0);
   }
 }
 
