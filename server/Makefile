@@ -5,8 +5,7 @@ ifdef CROSS_COMPILE
 endif
 
 all:
-	$(CC) server2.c -g -O0 -o aesdsocket
-	#$(CC) aesdsocket.c -g -O0 -o aesdsocket
+	$(CC) aesdsocket.c -g -O0 -o aesdsocket
 
 
 clean:
