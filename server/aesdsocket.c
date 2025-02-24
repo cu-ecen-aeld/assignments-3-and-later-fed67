@@ -10,7 +10,7 @@
 #include <unistd.h>
 
 #define PORT 9000
-#define BUFFER_SIZE 2048
+#define BUFFER_SIZE 16
 
 int socketfd = 0;
 int new_socket = 0;
@@ -25,8 +25,15 @@ int active_connection = 0;
 FILE* file = NULL;
 const char* filename = "/var/tmp/aesdsocketdata";
 
+static void handle_sigpipe(int signalnumber) {
+	//printf("SIGPIPE RECEIVED %d\n", signalnumber);
+}
+
 static void handle_signals(int signalnumber) {
   syslog(LOG_WARNING, "Caught signal, exeting");
+  printf("active_connection %i \n", active_connection);
+  if(active_connection == 0) {
+  	printf("Killing \n");
   if (socketfd > 0) {
     shutdown(socketfd, 0);
   }
@@ -37,6 +44,7 @@ static void handle_signals(int signalnumber) {
 
   remove(filename);
   exit(0);
+  }
 
 }
 
@@ -101,6 +109,7 @@ long int read_file(const char* filename, char** buffer) {
 
 void receive_connections() {
   struct sockaddr_in client_address;
+  active_connection = 0;
 
   if (listen(socketfd, 1) < 0) {
     perror("listen failed");
@@ -110,10 +119,11 @@ void receive_connections() {
 
   int n = 0;
   while (1) {
+  //remove(filename);
     syslog(LOG_NOTICE, "while\n");
     socklen_t clilen = sizeof(client_address);
     new_socket = accept(socketfd, (struct sockaddr*)&client_address, &clilen);
-    active_connection = 1;
+
 
     if (new_socket < 0) {
       syslog(LOG_ERR, "Got error socket: %s (errno: %d)\n", strerror(errno), errno);
@@ -123,23 +133,62 @@ void receive_connections() {
     } else {
       syslog(LOG_WARNING, "ACCEPTED connection from %d", client_address.sin_addr.s_addr);
     }
+    active_connection = 1;
 
     int new_line_recieved = 0;
-    while ( (n = recv(new_socket, buffer, BUFFER_SIZE, 0) )> 0) {
+    while ( 1 ) {
+    	n = recv(new_socket, buffer, BUFFER_SIZE, 0);
         write_file(filename, buffer, n);
-        if (buffer[n - 1] == '\n') {
+        if (n > 0 && buffer[n - 1] == '\n') {
           syslog(LOG_DEBUG, "receive zero");
+          break;
+        } else if( n < 0) {
+          syslog(LOG_DEBUG, "error");
           break;
         }
     }
     syslog(LOG_DEBUG, "sending response");
+    printf("send response\n");
     char* read_buffer;
     const int read_buffer_size = read_file(filename, &read_buffer);
+    syslog(LOG_DEBUG, "size %d", read_buffer_size);
+    printf("buffer\n");
+    for(int i = 0; i  < read_buffer_size; ++i) {
+    	printf("%c", read_buffer[i]);
+    }
+    
+    n = send(new_socket, read_buffer, read_buffer_size, 0 );
+    if( n < 0) {
+    		perror("SEND");
+    		exit(1);
+    	}
 
-    n = send(new_socket, read_buffer, read_buffer_size, 0);
+    //printf("read_buff %d\n", read_buffer_size);
+    /*for(int i = 0; i < read_buffer_size; i = i+BUFFER_SIZE) {
+    	int length = BUFFER_SIZE;
+    	if(i+BUFFER_SIZE > read_buffer_size) {
+		length = read_buffer_size - i;
+	}
+	
+    	memcpy(buffer, read_buffer+i, length);
+    	//printf("i %i length %d read_buff %d\n", i, length, read_buffer_size);
+    	//for(int k = 0; k < length; k++) {
+    	//	printf("Sending k %d %c\n", k, buffer[k]);
+    	//}
+    	//printf("End loop");
+    	n = send(new_socket, buffer, length, 0 );
+    	printf("n %d\n", n);
+    	if( n < 0) {
+    		perror("SEND");
+    	}
+    } */
 
-    free(read_buffer);
+    //sleep(1);
+    //shutdown(new_socket, SHUT_RDWR);
     close(new_socket);
+    free(read_buffer);
+
+    active_connection = 0;
   }
 }
 
@@ -153,7 +202,7 @@ void server_thread(const char* filename, int is_daemon) {
     exit(EXIT_FAILURE);
   }
 
-  if (setsockopt(socketfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
+  if (setsockopt(socketfd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt)) < 0) {
     syslog(LOG_ERR, "Got error setsockopt: %s (errno: %d)\n", strerror(errno), errno);
     perror("set socket failed");
   }
@@ -184,18 +233,19 @@ void server_thread(const char* filename, int is_daemon) {
     }
   }
 
-  if (setsid() < 0) {
-      syslog(LOG_ERR, "Error in setsid");
-      exit(EXIT_FAILURE);
-   }
+  //if (setsid() < 0) {
+  //    syslog(LOG_ERR, "Error in setsid");
+  //    perror("setsid");
+  //    exit(EXIT_FAILURE);
+  // }
 
-  close(STDIN_FILENO);
+  /*close(STDIN_FILENO);
   close(STDOUT_FILENO);
   close(STDERR_FILENO);
 
   open("/dev/null", O_RDONLY);
   open("/dev/null", O_WRONLY);
-  open("/dev/null", O_WRONLY);
+  open("/dev/null", O_WRONLY);*/
   
   receive_connections();
 
@@ -217,6 +267,7 @@ int main(int argc, const char* argv[]) {
   remove(filename);
   signal(SIGTERM, handle_signals);
   signal(SIGINT, handle_signals);
+  signal(SIGPIPE, handle_sigpipe);
 
 
   if (argc == 2) {

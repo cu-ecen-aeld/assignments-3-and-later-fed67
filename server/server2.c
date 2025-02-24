@@ -6,6 +6,10 @@
 #include <signal.h>
 #include <syslog.h>
 
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+
 #define PORT 9000
 #define BUFFER_SIZE 4096
 #define FILE_NAME "received_data.txt"
@@ -32,12 +36,73 @@ static void handle_signals(int signalnumber) {
 
 }
 
-int main() {
+void demonize() {
+  switch (fork()) {
+      case -1:
+        syslog(LOG_INFO, "Error during fork");
+        exit(EXIT_FAILURE);
+        break;
+      case 0:
+        break;
+      default:
+        syslog(LOG_INFO, "Main thread Exiting");
+        exit(EXIT_SUCCESS);
+        break;
+  }
+  
+  switch (fork()) {
+	case -1:
+	syslog(LOG_INFO, "Error during fork");
+	exit(EXIT_FAILURE);
+	break;
+	case 0:
+	break;
+	default:
+	syslog(LOG_INFO, "Main thread Exiting");
+	exit(EXIT_SUCCESS);
+	break;
+  }
+
+  if (setsid() < 0) {
+      syslog(LOG_ERR, "Error in setsid");
+      perror("setsid");
+      exit(EXIT_FAILURE);
+  }
+  
+  close(STDIN_FILENO);
+  close(STDOUT_FILENO);
+  close(STDERR_FILENO);
+
+  open("/dev/null", O_RDONLY);
+  open("/dev/null", O_WRONLY);
+  open("/dev/null", O_WRONLY);
+ }
+
+int match(const char* a, const char* b, int length) {
+  // if a is shorter than b then \0 != <character>
+  for (int i = 0; i < length; i++) {
+    if (a[i] != b[i]) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+int main(int argc, const char* argv[]) {
     openlog(NULL, LOG_CONS, LOG_SYSLOG);
 
     remove(FILE_NAME);
     signal(SIGTERM, handle_signals);
     signal(SIGINT, handle_signals);
+    
+    if (argc == 2) {
+	char cmd[2] = "-d";
+	int m = match(argv[1], cmd, 2);
+
+	if (m ==1) {
+		demonize();
+	}
+    }
   
 
     struct sockaddr_in address;
@@ -67,6 +132,10 @@ int main() {
         close(server_fd);
         exit(EXIT_FAILURE);
     }
+    
+    if(demonize) {
+    	demonize();
+    }
 
     // Listen for incoming connections
     if (listen(server_fd, 5) < 0) {
@@ -86,6 +155,7 @@ int main() {
             perror("Accept failed");
             continue;  // Skip to next loop iteration, keep server running
         }
+        active_connection = 1;
         
         printf("Client connected!\n");
 
@@ -184,7 +254,9 @@ int main() {
 
         // Close client connection but keep server running
         close(new_socket);
+        free(buffer_loc);
         printf("Client disconnected. Waiting for new connections...\n");
+        active_connection = 0;
     }
 
     // Close the server socket (this won't be reached in the infinite loop)
