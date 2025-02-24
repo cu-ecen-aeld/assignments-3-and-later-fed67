@@ -12,7 +12,7 @@
 
 #define PORT 9000
 #define BUFFER_SIZE 4096
-#define FILE_NAME "received_data.txt"
+#define FILE_NAME "/var/tmp/aesdsocketdata"
 
 int server_fd, new_socket;
 int active_connection = 0;
