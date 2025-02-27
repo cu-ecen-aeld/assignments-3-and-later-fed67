@@ -9,13 +9,39 @@
 #include <sys/types.h>
 #include <syslog.h>
 #include <unistd.h>
+#include <pthread.h>
+#include <time.h>
+
+
+#include <sys/queue.h> // Include sys/queue.h”
 
 #define PORT 9000
-#define BUFFER_SIZE 4096
+#define BUFFER_SIZE 512
 #define FILE_NAME "/var/tmp/aesdsocketdata"
+#define MAX_NUM_TTHREADS 1000
+#define C_NUM_CONNECTIONS 50
 
-int server_fd, new_socket;
+pthread_mutex_t  file_lock;
+
+int server_fd;
+int* new_socket;
 int active_connection = 0;
+
+struct Threads {
+    pthread_t thread;
+    int status;
+    int* new_socket;
+    SLIST_ENTRY(Threads) entries;
+};
+
+pthread_t t_time_id = -1;
+static struct TimeThreadArgs {
+  int execute;
+} timeThreadArgs;
+
+
+typedef SLIST_HEAD(thread_s, Threads) head_t;
+head_t queue;
 
 void perror_1(const char* c) {
   syslog(LOG_ERR, c, " %s (errno: %d)\n", strerror(errno), errno);
@@ -23,20 +49,66 @@ void perror_1(const char* c) {
 
 static void handle_signals(int signalnumber) {
   // syslog(LOG_WARNING, "Caught signal, exeting");
-  // printf("active_connection %i \n", active_connection);
-  if (active_connection == 0) {
+  printf("active_connection %i \n", active_connection);
+    while (!SLIST_EMPTY(&queue)) {
+      struct Threads* node = SLIST_FIRST(&queue);
+      printf("here node status %i id %lu \n", node->status, node->thread);
+      if(node->status == 1) {
+        pthread_join(node->thread, NULL);
+      }
+      free(node->new_socket);
+      SLIST_REMOVE_HEAD(&queue, entries);
+      free(node);
+    }
+
+  timeThreadArgs.execute = 0;
+  pthread_join(t_time_id, NULL);
+
+  // if (active_connection == 0) {
     printf("Killing \n");
     if (server_fd > 0) {
       shutdown(server_fd, 0);
     }
-
-    if (new_socket > 0) {
-      shutdown(new_socket, 0);
-    }
-
     remove(FILE_NAME);
     exit(0);
-  }
+  // }
+}
+
+void* time_thread(void* args) {
+    time_t rawtime;
+    struct tm *timeinfo;
+    char buffer[80];
+
+    struct TimeThreadArgs* timeThreadargs = (struct TimeThreadArgs*) args;
+
+    while(timeThreadargs->execute == 1) {
+      printf("timer sleep\n");
+      sleep(10);
+      printf("timer write\n");
+
+      time(&rawtime);
+
+      // Convert to local time format
+      timeinfo = localtime(&rawtime);
+
+      // Format the time as "YYYY-MM-DD HH:MM:SS"
+      size_t length = strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S\n", timeinfo);
+
+      pthread_mutex_lock(&file_lock);
+        FILE* file = fopen(FILE_NAME, "a");
+      if (!file) {
+        perror_1("File open failed");
+        return NULL; 
+      }
+
+      char d[10] = { "timestamp:" };
+      fwrite(d, sizeof(char), 10, file);
+      fwrite(buffer, sizeof(char), length, file);
+      fclose(file);
+      pthread_mutex_unlock(&file_lock);
+    }
+
+    return NULL;
 }
 
 void demonize() {
@@ -80,10 +152,10 @@ void demonize() {
   int dev_null = open("/dev/null", O_RDWR);
   if (dev_null == -1) {
     perror_1("open /dev/null failed");
-    return 1;
+    exit(1);
   }
 
-  // Redirect to /dev/null
+  // // Redirect to /dev/null
   dup2(dev_null, STDIN_FILENO);
   dup2(dev_null, STDOUT_FILENO);
   dup2(dev_null, STDERR_FILENO);
@@ -100,12 +172,106 @@ int match(const char* a, const char* b, int length) {
   return 1;
 }
 
+void* send_receive(void *arg ) {
+    char buffer[BUFFER_SIZE];
+    struct Threads* params = (struct Threads *)arg;  
+
+    params->status = 1;
+
+    printf("Client connected! id %lu\n", params->thread);
+
+    // Open file for writing received data
+    FILE* file = fopen(FILE_NAME, "a");
+    if (!file) {
+      perror_1("File open failed");
+      close(*params->new_socket);
+      return NULL;  // Skip this client but keep server running
+    }
+
+    int cont = 1;
+    while (cont == 1) {
+      // Receive data from netcat and write to file
+      ssize_t bytes_received;
+      while ((bytes_received = recv(*params->new_socket, buffer, BUFFER_SIZE, 0)) > 0) {
+        // printf("bytes_received %i \n", (int) bytes_received);
+        pthread_mutex_lock(&file_lock);
+        int ret = fwrite(buffer, sizeof(char), bytes_received, file);
+        pthread_mutex_unlock(&file_lock);
+
+        cont = 0;
+        if (buffer[bytes_received - 1] == '\n') {
+          break;
+        } else {
+          printf("Not endl received id %lu\n", params->thread);
+        }
+      }
+    }
+    fclose(file);
+
+    printf("Data received and stored in %s\n", FILE_NAME);
+
+    pthread_mutex_lock(&file_lock);
+    // Open file for reading
+    file = fopen(FILE_NAME, "r");
+    if (!file) {
+      perror("File open failed");
+      close(*params->new_socket);
+      exit(1);
+    }
+
+    // compute the file length
+    int result = fseek(file, 0L, SEEK_END);
+    if (result != 0) {
+      perror("Error calling fseek in read_file");
+      exit(1);
+    }
+
+    const int file_size = ftell(file);
+
+    result = fseek(file, 0L, SEEK_SET);
+    if (result != 0) {
+      perror("Error calling fseek in read_file");
+      exit(1);
+    }
+
+    char* buffer_loc = (char*)malloc(sizeof(char) * file_size);
+
+    while (1) {
+      // int bytes_received = fread(buffer, sizeof(char), BUFFER_SIZE, file);
+      int bytes_received = fread(buffer_loc, sizeof(char), file_size, file);
+      // printf("bytes_received %d \n", bytes_received);
+      if (bytes_received < 0) {
+        perror("reading failed");
+      }
+      int n = send(*params->new_socket, buffer_loc, bytes_received, 0);
+      // int n = send(new_socket, file, file_size, 0);
+      if (n < 0) {
+        perror("reading failed");
+      }
+      // printf("n %d\n", n);
+      break;
+    }
+    fclose(file);
+    pthread_mutex_unlock(&file_lock);
+
+    // printf("File contents sent back to client.\n");
+
+    // Close client connection but keep server running
+    close(*params->new_socket);
+    free(buffer_loc);
+    printf("Client disconnected. Waiting for new connections... thread id %lu \n", params->thread);
+    params->status = 0;
+    return NULL;
+}
+
 int main(int argc, const char* argv[]) {
   openlog(NULL, LOG_CONS, LOG_SYSLOG);
 
   remove(FILE_NAME);
   signal(SIGTERM, handle_signals);
   signal(SIGINT, handle_signals);
+
+  pthread_mutex_init(&file_lock, NULL);
 
   int demonize_var = 0;
   if (argc == 2) {
@@ -116,7 +282,6 @@ int main(int argc, const char* argv[]) {
 
   struct sockaddr_in address;
   socklen_t addr_len = sizeof(address);
-  char buffer[BUFFER_SIZE];
 
   // Create socket
   if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
@@ -156,18 +321,23 @@ int main(int argc, const char* argv[]) {
     }
 
     // Redirect to /dev/null
-    dup2(dev_null, STDIN_FILENO);
-    dup2(dev_null, STDOUT_FILENO);
-    dup2(dev_null, STDERR_FILENO);
-    close(dev_null);
+    // dup2(dev_null, STDIN_FILENO);
+    // dup2(dev_null, STDOUT_FILENO);
+    // dup2(dev_null, STDERR_FILENO);
+    // close(dev_null);
   }
 
+
   // Listen for incoming connections
-  if (listen(server_fd, 5) < 0) {
+  if (listen(server_fd, C_NUM_CONNECTIONS) < 0) {
     perror_1("Listen failed");
     close(server_fd);
     exit(EXIT_FAILURE);
   }
+
+  timeThreadArgs.execute = 0;
+pthread_create(&t_time_id, NULL, time_thread,  &timeThreadArgs);
+
 
   printf("Server listening on port %d...\n", PORT);
 
@@ -175,90 +345,30 @@ int main(int argc, const char* argv[]) {
     printf("Waiting for a new connection...\n");
 
     // Accept client connection
-    new_socket = accept(server_fd, (struct sockaddr*)&address, &addr_len);
+    new_socket = malloc(sizeof(int)); 
+    *new_socket = accept(server_fd, (struct sockaddr*)&address, &addr_len);
     if (new_socket < 0) {
       perror_1("Accept failed");
       continue;  // Skip to next loop iteration, keep server running
     }
-    active_connection = 1;
 
-    printf("Client connected!\n");
-
-    // Open file for writing received data
-    FILE* file = fopen(FILE_NAME, "a");
-    if (!file) {
-      perror_1("File open failed");
-      close(new_socket);
-      continue;  // Skip this client but keep server running
+    //execute timer thread when the first connection has started
+    if(timeThreadArgs.execute == 0) {
+      timeThreadArgs.execute = 1;
+      pthread_create(&t_time_id, NULL, time_thread,  &timeThreadArgs);
     }
 
-    int cont = 1;
-    while (cont == 1) {
-      // Receive data from netcat and write to file
-      ssize_t bytes_received;
-      while ((bytes_received = recv(new_socket, buffer, BUFFER_SIZE, 0)) > 0) {
-        // printf("bytes_received %i \n", (int) bytes_received);
-        int ret = fwrite(buffer, sizeof(char), bytes_received, file);
-        cont = 0;
-        if (buffer[bytes_received - 1] == '\n') {
-          break;
-        }
-      }
-    }
-    fclose(file);
 
-    printf("Data received and stored in %s\n", FILE_NAME);
+    struct Threads* t = (struct Threads*) malloc(sizeof(struct Threads));
+    t->new_socket = new_socket;
+    t->status = 1;
+    SLIST_INSERT_HEAD(&queue, t, entries);
 
-    // Open file for reading
-    file = fopen(FILE_NAME, "r");
-    if (!file) {
-      perror("File open failed");
-      close(new_socket);
-      continue;
-      exit(1);
-    }
+    pthread_create(&(t->thread), NULL, send_receive,  t);
 
-    // compute the file length
-    int result = fseek(file, 0L, SEEK_END);
-    if (result != 0) {
-      perror("Error calling fseek in read_file");
-      exit(1);
-    }
-    const int file_size = ftell(file);
-
-    result = fseek(file, 0L, SEEK_SET);
-    if (result != 0) {
-      perror("Error calling fseek in read_file");
-      exit(1);
-    }
-
-    char* buffer_loc = (char*)malloc(sizeof(char) * file_size);
-
-    while (1) {
-      // int bytes_received = fread(buffer, sizeof(char), BUFFER_SIZE, file);
-      int bytes_received = fread(buffer_loc, sizeof(char), file_size, file);
-      printf("bytes_received %d \n", bytes_received);
-      if (bytes_received < 0) {
-        perror("reading failed");
-      }
-      int n = send(new_socket, buffer_loc, bytes_received, 0);
-      // int n = send(new_socket, file, file_size, 0);
-      if (n < 0) {
-        perror("reading failed");
-      }
-      printf("n %d\n", n);
-      break;
-    }
-
-    fclose(file);
-    printf("File contents sent back to client.\n");
-
-    // Close client connection but keep server running
-    close(new_socket);
-    free(buffer_loc);
-    printf("Client disconnected. Waiting for new connections...\n");
-    active_connection = 0;
   }
+
+  pthread_mutex_destroy(&file_lock);
 
   // Close the server socket (this won't be reached in the infinite loop)
   close(server_fd);
