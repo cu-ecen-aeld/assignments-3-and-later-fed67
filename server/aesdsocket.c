@@ -61,7 +61,7 @@ static void handle_signals(int signalnumber) {
       free(node);
     }
 
-  timeThreadArgs.execute = 0;
+  pthread_cancel(t_time_id);
   pthread_join(t_time_id, NULL);
 
   // if (active_connection == 0) {
@@ -81,7 +81,7 @@ void* time_thread(void* args) {
 
     struct TimeThreadArgs* timeThreadargs = (struct TimeThreadArgs*) args;
 
-    while(timeThreadargs->execute == 1) {
+    while(1) {
       printf("timer sleep\n");
       sleep(10);
       printf("timer write\n");
