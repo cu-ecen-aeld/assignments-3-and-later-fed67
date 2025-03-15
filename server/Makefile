@@ -1,7 +1,6 @@
 CC ?= gcc
-CFLAGS ?= 
+CFLAGS ?= -DUSE_AESD_CHAR_DEVICE
 LDFLAGS ?= 
-
 
 ifdef CROSS_COMPILE 
 	CC = $(CROSS_COMPILE)gcc
