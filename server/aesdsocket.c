@@ -15,8 +15,13 @@
 #include <sys/queue.h>  // Include sys/queue.h”
 
 #define PORT 9000
-#define BUFFER_SIZE 512
+#define BUFFER_SIZE 2048
+#ifdef USE_AESD_CHAR_DEVICE
+#define FILE_NAME "/dev/aesdchar"
+#else
 #define FILE_NAME "/var/tmp/aesdsocketdata"
+#endif
+
 #define MAX_NUM_TTHREADS 1000
 #define C_NUM_CONNECTIONS 50
 
