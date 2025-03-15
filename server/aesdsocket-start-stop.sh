@@ -1,6 +1,9 @@
 PID=-1
 
 do_start() {
+
+    /usr/bin/aesdchar_load
+
     /usr/bin/aesdsocket -d
 
     PID=$!
