@@ -7,7 +7,7 @@ ifdef CROSS_COMPILE
 endif
 
 all:
-	$(CC) $(CFLAGS) aesdsocket.c -g -O0 -o aesdsocket $(LDFLAGS) -I../aesd-char-driver
+	$(CC) $(CFLAGS) aesdsocket.c -g -o aesdsocket $(LDFLAGS) -I../aesd-char-driver
 
 
 clean:
