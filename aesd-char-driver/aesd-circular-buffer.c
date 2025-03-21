@@ -115,18 +115,14 @@ size_t get_total_size(struct aesd_circular_buffer *buffer)
 int get_positions(struct aesd_circular_buffer *buffer, struct pair position)
 {   
     int size = 0;
-    // printk("position i %i j %i full %i in_off %i \n", position.i, position.j, buffer->full, buffer->in_offs );
     if( buffer->full && position.i >= AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED) {
-        printk("return if \n");
         //iterate over all elements 
         return -1;        
     } else if( !buffer->full && position.i >= buffer->in_offs) {
-        printk("return else if \n");
         return -1;
     }
 
     for(uint32_t i = 0; i < position.i; ++i) {
-        printk("for i %i \n", i);
         size += buffer->entry[i].size;
     }
     
