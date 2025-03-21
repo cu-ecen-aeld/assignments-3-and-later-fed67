@@ -100,6 +100,11 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
     for(size_t i = 0; i < read_size; ++i ) {
         size_t entry_offset_byte_rtn = 0;
 
+        if(i >= get_total_size(my_ring_buf)) {
+            PDEBUG("I(%i) > data size(%i)  \n", i, get_total_size(my_ring_buf) );
+            read_unlock_irqrestore(&myrwlock, flags);
+            break;
+        }
         struct aesd_buffer_entry* ptr = aesd_circular_buffer_find_entry_offset_for_fpos(my_ring_buf, pos+offset+i, &entry_offset_byte_rtn);
 
         if(ptr == NULL) {
@@ -114,16 +119,16 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
         num_data_read += 1;
     }
     pos += num_data_read;
-    PDEBUG("after loop pos %u size %u \n", pos, read_size );
+    // PDEBUG("after loop pos %u size %u \n", pos, num_data_read );
 
     read_unlock_irqrestore(&myrwlock, flags);
 
-    if(copy_to_user(buf, buffer_loc, read_size))
+    if(copy_to_user(buf, buffer_loc, num_data_read))
         return -EFAULT; 
 
     read_complete = 1;
 
-    return read_size;
+    return num_data_read;
 }
 
 ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
@@ -131,6 +136,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 {
     ssize_t retval = -ENOMEM;
     PDEBUG("write %zu bytes with offset %lld",count,*f_pos);
+    pos = 0; //reset the internal offset
     /**
      * TODO: handle write
      */
@@ -264,7 +270,6 @@ static long test_ioctl_ioctl(struct file *filp, unsigned int cmd, unsigned long 
             return -ENOTTY;
     }
    
-    PDEBUG("ICTRL return \n");
     return 0;
 }
 

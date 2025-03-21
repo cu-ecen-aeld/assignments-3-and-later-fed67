@@ -72,22 +72,8 @@ struct pair extract_numbers(char* a, size_t size) {
   p.y = -1;
   const int offset = 20;
 
-  // int buffer1[10];
-  // int i = 0;
-  // for(; i < 9; ++i) {
-  //   if(i+offset >= size) {
-  //     p.x = -1;
-  //     p.y = -1;
-  //     return p;
-  //   }
-  //   buffer1[i] = a[i+offset];
-
-
-  // }
-
   regex_t regex;
   regmatch_t match;
-  // const char *pattern = "AESDCHAR_IOCSEEKTO:[0-9]+,[0-9]+";  // Regular expression to find numbers
   const char *pattern = "[0-9]+";  // Regular expression to find numbers
 
   regex_t regex_sub;
@@ -106,31 +92,26 @@ struct pair extract_numbers(char* a, size_t size) {
     regoff_t size = match.rm_eo - match.rm_so;
     char number[size];
     for(regoff_t  i = 0; i < size; ++i ) {
-      printf("char %i %c \n", i , a[i+match.rm_so]);
       number[i] = a[i+match.rm_so];
     }
     number[match.rm_eo - match.rm_so] = '\0';
     p.x = atoi(number);
-    printf("Extracted number: %s p.x %i rm_eo %lu rm_so %lu number %s \n", number, p.x, match.rm_eo, match.rm_so, number);
+    // printf("Extracted number: %s p.x %i rm_eo %lu rm_so %lu number %s \n", number, p.x, match.rm_eo, match.rm_so, number);
 
     regoff_t offset = match.rm_eo + 1;
     if(regexec(&regex, a+ offset, 1, &match, 0) == 0) {
       regoff_t size = match.rm_eo - match.rm_so;
 
-      printf("offset %lu rm_eo %lu rm_so %lu size %lu \n", offset, match.rm_eo, match.rm_so, size );
 
       char numbery[size];
       // char* c = malloc(sizeof(char)*);
 
       for(regoff_t  i = 0; i < size; ++i ) {
-        printf("char2 %i %c indx %u \n", i , a[i+offset+match.rm_so], i+offset+match.rm_so);
         numbery[i] = a[i+offset+match.rm_so];
       }
       number[match.rm_eo - match.rm_so] = '\0';
       p.y = atoi(numbery);
-      printf("Extracted number: %s p.y %i number %s\n", numbery, p.y), number;
     } else {
-      printf("no match found \n");
     }
 
   }
@@ -185,16 +166,16 @@ void* time_thread(void* args) {
     size_t length = strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S\n", timeinfo);
 
     pthread_mutex_lock(&file_lock);
-    // FILE* file = fopen(FILE_NAME, "a");
-    // if (!file) {
-    //   perror_1("File open failed");
-    //   return NULL;
-    // }
+    FILE* file = fopen(FILE_NAME, "a");
+    if (!file) {
+      perror_1("File open failed");
+      return NULL;
+    }
 
-    // char d[10] = {"timestamp:"};
-    // fwrite(d, sizeof(char), 10, file);
-    // fwrite(buffer, sizeof(char), length, file);
-    // fclose(file);
+    char d[10] = {"timestamp:"};
+    fwrite(d, sizeof(char), 10, file);
+    fwrite(buffer, sizeof(char), length, file);
+    fclose(file);
     pthread_mutex_unlock(&file_lock);
   }
 
@@ -234,10 +215,6 @@ void demonize() {
     exit(EXIT_FAILURE);
   }
 
-  // if( chdir("/") < 0) {
-  //    perror("setsid");
-  // 	  perror_1("Error");
-  // }
 
   int dev_null = open("/dev/null", O_RDWR);
   if (dev_null == -1) {
@@ -291,41 +268,32 @@ void* send_receive(void* arg) {
 
   printf("file open return %d \n", file);
 
-  // if (!file) {
-  //   perror_1("File open failed");
-  //   close(*params->new_socket);
-  //   return NULL;  // Skip this client but keep server running
-  // }
-
   int cont = 1;
   while (cont == 1) {
-    printf("while");
+
     // Receive data from netcat and write to file
     ssize_t bytes_received;
     while ((bytes_received = recv(*params->new_socket, buffer, BUFFER_SIZE, 0)) > 0) {
-      printf("bytes_received %i \n", (int) bytes_received);
+      // printf("bytes_received %i \n", (int) bytes_received);
       pthread_mutex_lock(&file_lock);
+
       #ifdef USE_AESD_CHAR_DEVICE
-      if(string_match(buffer, BUFFER_SIZE, "AESDCHAR_IOCSEEKTO:", 19)) {
-        printf("if ioctl \n");
+      if(string_match(buffer, bytes_received, "AESDCHAR_IOCSEEKTO:", 19)) {
+        syslog(LOG_DEBUG, "if ioctl \n");
         struct pair p = extract_numbers(buffer, BUFFER_SIZE);
-        if(p.x == -1 || p.y == -1) {
 
-        }
         struct  aesd_seekto* messsage = (struct  aesd_seekto*) malloc(sizeof(struct aesd_seekto));
-        messsage->write_cmd = p.x-1;
-        messsage->write_cmd_offset = p.y-1;
+        messsage->write_cmd = p.x;
+        messsage->write_cmd_offset = p.y;
 
-        printf("px %i py %i \n", p.x, p.y);
-        if(p.x < 1  || p.y < 1 ) {
+        // printf("px %i py %i \n", p.x, p.y);
+        if(p.x < 0  || p.y < 0 ) {
+          pthread_mutex_unlock(&file_lock);
           perror("p.x < 0  || p.y < 0");
           close(*params->new_socket);
           return NULL;
         }
 
-        printf("file id %d \n", file);
-
-        // int file = open(FILE_NAME, O_RDWR);
 
         if (file < 0) {
           printf("error opeing file ictl %d\n", file);
@@ -336,6 +304,7 @@ void* send_receive(void* arg) {
         
         if (ioctl(file, AESDCHAR_IOCSEEKTO, messsage) == -1) {
           perror("ioctl failed");
+          pthread_mutex_unlock(&file_lock);
           close(file);
           close(*params->new_socket);
           return NULL;
@@ -352,8 +321,8 @@ void* send_receive(void* arg) {
       } else {
         printf("else write \n");
       #endif
-      printf("bytes recievec %s   end", buffer);
-      printf("bytes_received %lu   end", bytes_received);
+      // printf("bytes recievec %s   end", buffer);
+      // printf("bytes_received %lu   end", bytes_received);
 
       #ifdef USE_AESD_CHAR_DEVICE
         int ret = write(file, buffer, bytes_received);
@@ -396,42 +365,6 @@ void* send_receive(void* arg) {
     file = fopen(FILE_NAME, "r");
   #endif
 
-  // if (!file) {
-  //   perror("File open failed");
-  //   close(*params->new_socket);
-  //   exit(1);
-  // }
-
-  // compute the file length
-  // #ifdef USE_AESD_CHAR_DEVICE
-  //   int result = lseek(file, SEEK_END, 0L);
-  // #else
-  //   int result = fseek(file, 0L, SEEK_END);
-  // #endif  
-  
-  // printf("lseek end %i \n", result);
-  // if (result < 0) {
-  //   perror("Error calling fseek in read_file");
-  //   exit(1);
-  // }
-  // int end = result;
-
-  // const int file_size = ftell(file);
-  // #ifdef USE_AESD_CHAR_DEVICE
-  //   result = lseek(file, SEEK_SET, 0L);
-  // #else
-  //   result = fseek(file, 0L, SEEK_SET);
-  // #endif
-
-  // const int file_size = end - result;
-  // printf("file size %i end %i start %i \n", file_size, end, result);
-
-
-  // if (result < 0) {
-  //   perror("Error calling fseek in read_file");
-  //   exit(1);
-  // }
-
   char* buffer_loc = (char*)malloc(sizeof(char) * BUFFER_SIZE);
   // char buffer_loc[BUFFER_SIZE];
 
@@ -449,14 +382,11 @@ void* send_receive(void* arg) {
     } else if(bytes_received == 0) {
       break;
     }
-    for(int i = 0; i < bytes_received; ++i) {
-      printf("i %i %c >\n", i, buffer_loc[i]);
-    }
+
 
     int n = send(*params->new_socket, buffer_loc, bytes_received, 0);
-    printf("sent %s \n", buffer_loc);
     if (n < 0) {
-      printf("sending failed");
+      // printf("sending failed");
       perror("sending failed");
     }
     
