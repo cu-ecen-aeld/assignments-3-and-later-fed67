@@ -1,13 +1,13 @@
 CC ?= gcc
 CFLAGS ?= -DUSE_AESD_CHAR_DEVICE
-LDFLAGS ?= 
+LDFLAGS += -lm
 
 ifdef CROSS_COMPILE 
 	CC = $(CROSS_COMPILE)gcc
 endif
 
 all:
-	$(CC) $(CFLAGS) aesdsocket.c -g -O0 -o aesdsocket $(LDFLAGS)
+	$(CC) $(CFLAGS) aesdsocket.c -g -O0 -o aesdsocket $(LDFLAGS) -I../aesd-char-driver
 
 
 clean:

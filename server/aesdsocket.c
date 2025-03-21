@@ -11,8 +11,14 @@
 #include <syslog.h>
 #include <time.h>
 #include <unistd.h>
+#include <math.h>
+
+#include <regex.h>
+
+#define USE_AESD_CHAR_DEVICE 1
 
 #include <sys/queue.h>  // Include sys/queue.h”
+#include "aesd_ioctl.h"
 
 #define PORT 9000
 #define BUFFER_SIZE 2048
@@ -43,6 +49,94 @@ pthread_t t_time_id = -1;
 
 typedef SLIST_HEAD(thread_s, Threads) head_t;
 head_t queue;
+
+struct pair {
+  int x;
+  int y;
+};
+
+int string_match(char* a, size_t size_a, char* b, size_t size_b) {
+  size_t size_min = fmin(size_a, size_b);
+  for(size_t i = 0; i < size_min; ++i) {
+    if(a[i] != b[i]) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+
+struct pair extract_numbers(char* a, size_t size) {
+  struct pair p;
+  p.x = -1;
+  p.y = -1;
+  const int offset = 20;
+
+  // int buffer1[10];
+  // int i = 0;
+  // for(; i < 9; ++i) {
+  //   if(i+offset >= size) {
+  //     p.x = -1;
+  //     p.y = -1;
+  //     return p;
+  //   }
+  //   buffer1[i] = a[i+offset];
+
+
+  // }
+
+  regex_t regex;
+  regmatch_t match;
+  // const char *pattern = "AESDCHAR_IOCSEEKTO:[0-9]+,[0-9]+";  // Regular expression to find numbers
+  const char *pattern = "[0-9]+";  // Regular expression to find numbers
+
+  regex_t regex_sub;
+  regmatch_t match_sub;
+  const char *pattern_sub = "[0-9]+,";  // Regular expression to find numbers
+
+  if (regcomp(&regex, pattern, REG_EXTENDED)) {
+    return p;
+  }
+  if (regcomp(&regex_sub, pattern_sub, REG_EXTENDED)) {
+    return p;
+  }
+
+  if (regexec(&regex, a, 1, &match, 0) == 0) {
+    // Extract matched number from the string
+    regoff_t size = match.rm_eo - match.rm_so;
+    char number[size];
+    for(regoff_t  i = 0; i < size; ++i ) {
+      printf("char %i %c \n", i , a[i+match.rm_so]);
+      number[i] = a[i+match.rm_so];
+    }
+    number[match.rm_eo - match.rm_so] = '\0';
+    p.x = atoi(number);
+    printf("Extracted number: %s p.x %i rm_eo %lu rm_so %lu number %s \n", number, p.x, match.rm_eo, match.rm_so, number);
+
+    regoff_t offset = match.rm_eo + 1;
+    if(regexec(&regex, a+ offset, 1, &match, 0) == 0) {
+      regoff_t size = match.rm_eo - match.rm_so;
+
+      printf("offset %lu rm_eo %lu rm_so %lu size %lu \n", offset, match.rm_eo, match.rm_so, size );
+
+      char numbery[size];
+      // char* c = malloc(sizeof(char)*);
+
+      for(regoff_t  i = 0; i < size; ++i ) {
+        printf("char2 %i %c indx %u \n", i , a[i+offset+match.rm_so], i+offset+match.rm_so);
+        numbery[i] = a[i+offset+match.rm_so];
+      }
+      number[match.rm_eo - match.rm_so] = '\0';
+      p.y = atoi(numbery);
+      printf("Extracted number: %s p.y %i number %s\n", numbery, p.y), number;
+    } else {
+      printf("no match found \n");
+    }
+
+  }
+  return p;
+}
+
 
 void perror_1(const char* c) {
   syslog(LOG_ERR, c, " %s (errno: %d)\n", strerror(errno), errno);
@@ -78,9 +172,9 @@ void* time_thread(void* args) {
   char buffer[80];
 
   while (1) {
-    printf("timer sleep\n");
+    // printf("timer sleep\n");
     sleep(10);
-    printf("timer write\n");
+    // printf("timer write\n");
 
     time(&rawtime);
 
@@ -91,16 +185,16 @@ void* time_thread(void* args) {
     size_t length = strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S\n", timeinfo);
 
     pthread_mutex_lock(&file_lock);
-    FILE* file = fopen(FILE_NAME, "a");
-    if (!file) {
-      perror_1("File open failed");
-      return NULL;
-    }
+    // FILE* file = fopen(FILE_NAME, "a");
+    // if (!file) {
+    //   perror_1("File open failed");
+    //   return NULL;
+    // }
 
-    char d[10] = {"timestamp:"};
-    fwrite(d, sizeof(char), 10, file);
-    fwrite(buffer, sizeof(char), length, file);
-    fclose(file);
+    // char d[10] = {"timestamp:"};
+    // fwrite(d, sizeof(char), 10, file);
+    // fwrite(buffer, sizeof(char), length, file);
+    // fclose(file);
     pthread_mutex_unlock(&file_lock);
   }
 
@@ -176,77 +270,204 @@ void* send_receive(void* arg) {
   printf("Client connected! id %lu\n", params->thread);
 
   // Open file for writing received data
-  FILE* file = fopen(FILE_NAME, "a");
-  if (!file) {
-    perror_1("File open failed");
-    close(*params->new_socket);
-    return NULL;  // Skip this client but keep server running
-  }
+  #ifdef USE_AESD_CHAR_DEVICE
+     int file = open(FILE_NAME, O_RDWR);
+
+     if (file < 0) {
+      printf("error %d\n", file);
+      perror_1("File open failed");
+      close(*params->new_socket);
+      return NULL;  // Skip this client but keep server running
+    }
+  #else
+    FILE* file = fopen(FILE_NAME, "a");
+
+    if (!file) {
+      perror_1("File open failed");
+      close(*params->new_socket);
+      return NULL;  // Skip this client but keep server running
+    }
+  #endif
+
+  printf("file open return %d \n", file);
+
+  // if (!file) {
+  //   perror_1("File open failed");
+  //   close(*params->new_socket);
+  //   return NULL;  // Skip this client but keep server running
+  // }
 
   int cont = 1;
   while (cont == 1) {
+    printf("while");
     // Receive data from netcat and write to file
     ssize_t bytes_received;
     while ((bytes_received = recv(*params->new_socket, buffer, BUFFER_SIZE, 0)) > 0) {
-      // printf("bytes_received %i \n", (int) bytes_received);
+      printf("bytes_received %i \n", (int) bytes_received);
       pthread_mutex_lock(&file_lock);
-      int ret = fwrite(buffer, sizeof(char), bytes_received, file);
-      pthread_mutex_unlock(&file_lock);
+      #ifdef USE_AESD_CHAR_DEVICE
+      if(string_match(buffer, BUFFER_SIZE, "AESDCHAR_IOCSEEKTO:", 19)) {
+        printf("if ioctl \n");
+        struct pair p = extract_numbers(buffer, BUFFER_SIZE);
+        if(p.x == -1 || p.y == -1) {
 
-      if(ret < 0) {
-        perror_1("Error writing to file failed");
-        fclose(file);
-        return NULL;
+        }
+        struct  aesd_seekto* messsage = (struct  aesd_seekto*) malloc(sizeof(struct aesd_seekto));
+        messsage->write_cmd = p.x-1;
+        messsage->write_cmd_offset = p.y-1;
+
+        printf("px %i py %i \n", p.x, p.y);
+        if(p.x < 1  || p.y < 1 ) {
+          perror("p.x < 0  || p.y < 0");
+          close(*params->new_socket);
+          return NULL;
+        }
+
+        printf("file id %d \n", file);
+
+        // int file = open(FILE_NAME, O_RDWR);
+
+        if (file < 0) {
+          printf("error opeing file ictl %d\n", file);
+          // perror_1("File open failed");
+          close(*params->new_socket);
+          return NULL;  // Skip this client but keep server running
+        }
+        
+        if (ioctl(file, AESDCHAR_IOCSEEKTO, messsage) == -1) {
+          perror("ioctl failed");
+          close(file);
+          close(*params->new_socket);
+          return NULL;
+        }
+
+        printf("closing");
+        close(file);
+
+        free(messsage);
+        pthread_mutex_unlock(&file_lock);
+
+        goto break_loop;
+  
+      } else {
+        printf("else write \n");
+      #endif
+      printf("bytes recievec %s   end", buffer);
+      printf("bytes_received %lu   end", bytes_received);
+
+      #ifdef USE_AESD_CHAR_DEVICE
+        int ret = write(file, buffer, bytes_received);
+      #else
+        int ret = fwrite(buffer, sizeof(char), bytes_received, file);
+      #endif
+
+        pthread_mutex_unlock(&file_lock);
+
+        if(ret < 0) {
+          printf("write ret y 0 %d \n", ret);
+          perror_1("Error writing to file failed");
+          #ifdef USE_AESD_CHAR_DEVICE
+            close(file);
+          #else
+            fclose(file);
+          #endif 
+          return NULL;
+        }
       }
-
       cont = 0;
+
       if (buffer[bytes_received - 1] == '\n') {
         break;
       }
     }
   }
-  fclose(file);
 
-  // printf("Data received and stored in %s\n", FILE_NAME);
+  break_loop:
+
+  printf("Data received and stored in %s\n", FILE_NAME);
 
   pthread_mutex_lock(&file_lock);
   // Open file for reading
-  file = fopen(FILE_NAME, "r");
-  if (!file) {
-    perror("File open failed");
-    close(*params->new_socket);
-    exit(1);
-  }
+  
+  #ifdef USE_AESD_CHAR_DEVICE
+    // file = open(FILE_NAME, O_RDONLY);
+    file = open(FILE_NAME, O_RDWR);
+  #else
+    file = fopen(FILE_NAME, "r");
+  #endif
+
+  // if (!file) {
+  //   perror("File open failed");
+  //   close(*params->new_socket);
+  //   exit(1);
+  // }
 
   // compute the file length
-  int result = fseek(file, 0L, SEEK_END);
-  if (result != 0) {
-    perror("Error calling fseek in read_file");
-    exit(1);
-  }
+  // #ifdef USE_AESD_CHAR_DEVICE
+  //   int result = lseek(file, SEEK_END, 0L);
+  // #else
+  //   int result = fseek(file, 0L, SEEK_END);
+  // #endif  
+  
+  // printf("lseek end %i \n", result);
+  // if (result < 0) {
+  //   perror("Error calling fseek in read_file");
+  //   exit(1);
+  // }
+  // int end = result;
 
-  const int file_size = ftell(file);
+  // const int file_size = ftell(file);
+  // #ifdef USE_AESD_CHAR_DEVICE
+  //   result = lseek(file, SEEK_SET, 0L);
+  // #else
+  //   result = fseek(file, 0L, SEEK_SET);
+  // #endif
 
-  result = fseek(file, 0L, SEEK_SET);
-  if (result != 0) {
-    perror("Error calling fseek in read_file");
-    exit(1);
-  }
+  // const int file_size = end - result;
+  // printf("file size %i end %i start %i \n", file_size, end, result);
 
-  char* buffer_loc = (char*)malloc(sizeof(char) * file_size);
+
+  // if (result < 0) {
+  //   perror("Error calling fseek in read_file");
+  //   exit(1);
+  // }
+
+  char* buffer_loc = (char*)malloc(sizeof(char) * BUFFER_SIZE);
+  // char buffer_loc[BUFFER_SIZE];
 
   while (1) {
-    int bytes_received = fread(buffer_loc, sizeof(char), file_size, file);
+    printf("while loop read\n");
+    #ifdef USE_AESD_CHAR_DEVICE
+      int bytes_received = read(file, buffer_loc, sizeof(char)*BUFFER_SIZE);
+    #else
+      int bytes_received = fread(buffer_loc, sizeof(char), BUFFER_SIZE, file);
+    #endif
+    printf("while loop read %d \n", bytes_received);
+    
     if (bytes_received < 0) {
       perror("reading failed");
+    } else if(bytes_received == 0) {
+      break;
     }
+    for(int i = 0; i < bytes_received; ++i) {
+      printf("i %i %c >\n", i, buffer_loc[i]);
+    }
+
     int n = send(*params->new_socket, buffer_loc, bytes_received, 0);
+    printf("sent %s \n", buffer_loc);
     if (n < 0) {
-      perror("reading failed");
+      printf("sending failed");
+      perror("sending failed");
     }
-    break;
+    
   }
-  fclose(file);
+
+  #ifdef USE_AESD_CHAR_DEVICE
+    close(file);
+  #else
+    fclose(file);
+  #endif
+
   pthread_mutex_unlock(&file_lock);
 
   // printf("File contents sent back to client.\n");
@@ -262,7 +483,9 @@ void* send_receive(void* arg) {
 int main(int argc, const char* argv[]) {
   openlog(NULL, LOG_CONS, LOG_SYSLOG);
 
-  remove(FILE_NAME);
+  #ifndef USE_AESD_CHAR_DEVICE
+   remove(FILE_NAME);
+  #endif
   signal(SIGTERM, handle_signals);
   signal(SIGINT, handle_signals);
 
@@ -305,6 +528,8 @@ int main(int argc, const char* argv[]) {
 
   printf("daemonize %i \n", demonize_var);
 
+
+
   if (demonize_var == 1) {
     demonize();
   } else {
@@ -314,11 +539,11 @@ int main(int argc, const char* argv[]) {
       return 1;
     }
 
-    // Redirect to /dev/null
-    dup2(dev_null, STDIN_FILENO);
-    dup2(dev_null, STDOUT_FILENO);
-    dup2(dev_null, STDERR_FILENO);
-    close(dev_null);
+    // // Redirect to /dev/null
+    // dup2(dev_null, STDIN_FILENO);
+    // dup2(dev_null, STDOUT_FILENO);
+    // dup2(dev_null, STDERR_FILENO);
+    // close(dev_null);
   }
 
   // Listen for incoming connections

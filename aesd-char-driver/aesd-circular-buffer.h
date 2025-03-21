@@ -51,6 +51,11 @@ struct aesd_circular_buffer
     bool full;
 };
 
+struct pair {
+    uint32_t i;
+    uint32_t j
+};
+
 extern struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(struct aesd_circular_buffer *buffer,
             size_t char_offset, size_t *entry_offset_byte_rtn );
 
@@ -59,6 +64,8 @@ extern void aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, 
 extern void aesd_circular_buffer_init(struct aesd_circular_buffer *buffer);
 
 extern size_t get_total_size(struct aesd_circular_buffer *buffer);
+
+extern int get_positions(struct aesd_circular_buffer *buffer, struct pair position);
 
 /**
  * Create a for loop to iterate over each member of the circular buffer.
